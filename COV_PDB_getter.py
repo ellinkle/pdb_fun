@@ -1,17 +1,15 @@
 import requests
 import pypdb
+import pandas as pd
+import restful_2020
 
-# list of pdbs to acquire collection dates from (use restful_ex.py to get MX list)
-pdb_list = ['4P15', '3BFO', '4Z9C']
-# search term in cif file for collection date
-string = '_diffrn_detector.pdbx_collection_date'
+# queries PDB using restful API
+response = restful_2020.PDB_searcher()
+pdb_list = restful_2020.convert_to_ID(response)
 
-# a tool for downloading and saving cif files from the databank. Files save to working dir.
-def cif_downloader(ID):
-    full_url = "https://files.rcsb.org/download/"
-    full_url += ID + ".cif"
-    response = requests.get(full_url)
-    open(f"{ID}.cif", 'wb').write(response.content)
+# search terms in cif file for collection site and date
+synch_string = '_diffrn_source.pdbx_synchrotron_site'
+date_string = '_diffrn_detector.pdbx_collection_date'
 
 # func from pypdb that gets cif data for given ID (does not save file)
 def get_pdb(ID):
@@ -22,16 +20,58 @@ def get_pdb(ID):
 def lines_that_contain(string, fp):
     return [line for line in fp.splitlines() if string in line]
 
-# searches cif for string, outputs date in format YY-MM-DD as a string
+# searches cif for collection site string, strips empty spaces
+def collection_site(cif_file):
+    result = lines_that_contain(synch_string, cif_file)
+    site = (result[0].split('       ')[1]).strip()
+    return site
+
+# searches cif for collection date string, strips empty spaces
 def collection_date(cif_file):
-    result = lines_that_contain(string, cif_file)
-    date1 = str(result).split('20')[1]
-    date2 = date1.split(' ')[0]
-    return(date2)
+        result = lines_that_contain(date_string, cif_file)
+        date = (result[0].split('         ')[1]).strip()
+        return date
 
+# Aus Synch IDs will get put here
+results = []
 
+# Checks all PDBs and grabs Aus Synch ones, puts into 'results' list
+# bad error handling, but sometimes cifs have empty fields and upset program
 for ID in pdb_list:
+    print(f"Checking {ID}...")
     pdb_string = get_pdb(ID)
-    date = collection_date(pdb_string)
-    print(date)
+    try:
+        site = collection_site(pdb_string)
+        if site == "'Australian Synchrotron'":
+            results.append(ID)
+        else:
+            continue
+    except:
+        continue
 
+# make an empty dataframe to put PDB info into
+data = {'PDB ID': [], 'TITLE': [], 'AUTHORS': [], 'COLLECTION DATE': []}
+df = pd.DataFrame.from_dict(data)
+
+# using pypdb to fetch description data for given ID, append to dataframe
+# collection date is sometimes empty or a ? so error exception to output empty field rather than crashing
+for ID in results:
+    print(f"Adding {ID}...")
+    pdb_string = get_pdb(ID)
+    pypdb.describe_pdb(ID)
+    out = pypdb.get_info(ID, url_root = 'http://www.rcsb.org/pdb/rest/describePDB?structureId=')
+    out = pypdb.to_dict(out)
+    outdict = pypdb.remove_at_sign(out['PDBdescription']['PDB'])
+    try:
+        date = collection_date(pdb_string)
+    except:
+        date = []
+    newer = {'PDB ID':(outdict['structureId']), 'TITLE':(outdict['title']), 'AUTHORS': (outdict['structure_authors']), 'COLLECTION DATE': (collection_date(pdb_string))}
+    df = df.append(newer,ignore_index=True,sort=False)
+
+
+# convert dataframe to csv
+df.to_csv(r"Aus_Synch_PDBs_2020.csv",
+           header=True, index = False)
+
+print(f"Check finished. {len(results)} items in spreadsheet.")
