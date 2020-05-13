@@ -2,6 +2,12 @@ import requests
 import pypdb
 import pandas as pd
 import restful_2020
+from beamline import redis
+import pickle
+
+# define redis key and expiry
+KEY = 'eleanor:covid_pdb_getter:something'
+EXP = 60 * 60 * 24 * 30
 
 # queries PDB using restful API
 response = restful_2020.PDB_searcher()
@@ -69,9 +75,18 @@ for ID in results:
     newer = {'PDB ID':(outdict['structureId']), 'TITLE':(outdict['title']), 'AUTHORS': (outdict['structure_authors']), 'COLLECTION DATE': (collection_date(pdb_string))}
     df = df.append(newer,ignore_index=True,sort=False)
 
+# pickle --> object serialization (better format for pushing to redis and then getting and depickling)
+df_pickle = pickle.dumps(df)
+
+
+# putting df_pickle in redis under KEY with expiry time EXP
+redis.setex(KEY, EXP, df_pickle)
+
+
 
 # convert dataframe to csv
-df.to_csv(r"Aus_Synch_PDBs_2020.csv",
-           header=True, index = False)
+#df.to_csv(r"Aus_Synch_PDBs_2020.csv",
+#           header=True, index = False)
 
-print(f"Check finished. {len(results)} items in spreadsheet.")
+
+print(f"Check finished. {len(results)} PDB IDs in dataframe, pickled and sent to redis.")
